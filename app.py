@@ -72,6 +72,8 @@ def _load_fg_batting(season: int) -> pd.DataFrame:
 
 
 def _find_fg_pitcher(name: str, fg_df: pd.DataFrame) -> pd.Series | None:
+    if not isinstance(name, str) or not name.strip():
+        return None
     if fg_df.empty or "Name" not in fg_df.columns:
         return None
     name_n = _norm(name)
@@ -83,6 +85,8 @@ def _find_fg_pitcher(name: str, fg_df: pd.DataFrame) -> pd.Series | None:
 
 
 def _find_fg_batter(name: str, fg_df: pd.DataFrame) -> pd.Series | None:
+    if not isinstance(name, str) or not name.strip():
+        return None
     if fg_df.empty or "Name" not in fg_df.columns:
         return None
     name_n = _norm(name)
@@ -730,8 +734,10 @@ def main() -> None:
     home_team = game["home_team"]
     away_team = game["away_team"]
     game_id = game["game_id"]
-    home_starter_name = game.get("home_starter")
-    away_starter_name = game.get("away_starter")
+    _hs = game.get("home_starter")
+    home_starter_name = _hs if isinstance(_hs, str) and _hs.strip() else None
+    _as = game.get("away_starter")
+    away_starter_name = _as if isinstance(_as, str) and _as.strip() else None
     home_starter_id = game.get("home_starter_id")
     away_starter_id = game.get("away_starter_id")
 

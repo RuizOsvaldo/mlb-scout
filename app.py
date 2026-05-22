@@ -48,6 +48,8 @@ CURRENT_SEASON = datetime.date.today().year
 # ---------------------------------------------------------------------------
 
 def _norm(s: str) -> str:
+    if not isinstance(s, str):
+        raise TypeError(f"_norm expects str, got {type(s).__name__}: {s!r}")
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
 
 
@@ -73,8 +75,9 @@ def _find_fg_pitcher(name: str, fg_df: pd.DataFrame) -> pd.Series | None:
     if fg_df.empty or "Name" not in fg_df.columns:
         return None
     name_n = _norm(name)
-    for _, row in fg_df.iterrows():
-        if _norm(str(row.get("Name", ""))) == name_n:
+    clean_df = fg_df.dropna(subset=["Name"])
+    for _, row in clean_df.iterrows():
+        if _norm(str(row["Name"])) == name_n:
             return row
     return None
 
@@ -83,8 +86,9 @@ def _find_fg_batter(name: str, fg_df: pd.DataFrame) -> pd.Series | None:
     if fg_df.empty or "Name" not in fg_df.columns:
         return None
     name_n = _norm(name)
-    for _, row in fg_df.iterrows():
-        if _norm(str(row.get("Name", ""))) == name_n:
+    clean_df = fg_df.dropna(subset=["Name"])
+    for _, row in clean_df.iterrows():
+        if _norm(str(row["Name"])) == name_n:
             return row
     return None
 

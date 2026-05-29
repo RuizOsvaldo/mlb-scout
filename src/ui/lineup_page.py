@@ -180,7 +180,10 @@ def render_hot_cold_zones(statcast_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
     # Only batted balls with location data
-    df = statcast_df.dropna(subset=["plate_x", "plate_z", "launch_speed"]).copy()
+    required_cols = {"plate_x", "plate_z", "launch_speed"}
+    if not required_cols.issubset(statcast_df.columns):
+        return fig
+    df = statcast_df.dropna(subset=list(required_cols)).copy()
 
     # Strike zone boundaries (split evenly into 3 columns × 3 rows)
     x_edges = [-0.83, -0.28, 0.28, 0.83]

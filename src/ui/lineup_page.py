@@ -333,6 +333,60 @@ def render_batter_sabermetrics(statcast_df: pd.DataFrame) -> None:
         c14.metric("Oppo%",   f"{oppo_pct:.1%}")
 
 
+def render_last_10_games(statcast_df: pd.DataFrame) -> None:
+    """Table of per-game stats for the last 10 games played."""
+    if statcast_df.empty or "game_date" not in statcast_df.columns:
+        return
+
+    # Plate appearance rows only (events populated on the final pitch of each PA)
+    pa_df = statcast_df[statcast_df["events"].notna()].copy()
+    if pa_df.empty:
+        return
+
+    pa_df["game_date"] = pd.to_datetime(pa_df["game_date"])
+
+    hit_events = {"single", "double", "triple", "home_run"}
+
+    def _agg_game(grp: pd.DataFrame) -> pd.Series:
+        ev = grp["launch_speed"].dropna()
+        xwoba_col = "estimated_woba_using_speedangle"
+        xw = grp[xwoba_col].dropna() if xwoba_col in grp.columns else pd.Series(dtype=float)
+        return pd.Series({
+            "PA":     len(grp),
+            "H":      grp["events"].isin(hit_events).sum(),
+            "2B":     (grp["events"] == "double").sum(),
+            "3B":     (grp["events"] == "triple").sum(),
+            "HR":     (grp["events"] == "home_run").sum(),
+            "BB":     (grp["events"] == "walk").sum(),
+            "K":      (grp["events"] == "strikeout").sum(),
+            "Avg EV": round(ev.mean(), 1) if not ev.empty else None,
+            "xwOBA":  round(xw.mean(), 3) if not xw.empty else None,
+        })
+
+    game_stats = (
+        pa_df.groupby("game_date")
+        .apply(_agg_game)
+        .reset_index()
+        .sort_values("game_date", ascending=False)
+        .head(10)
+    )
+    game_stats["game_date"] = game_stats["game_date"].dt.strftime("%Y-%m-%d")
+    game_stats = game_stats.rename(columns={"game_date": "Date"})
+
+    # Integer columns
+    for col in ["PA", "H", "2B", "3B", "HR", "BB", "K"]:
+        game_stats[col] = game_stats[col].astype(int)
+
+    def _fmt(val, fmt):
+        return f"{val:{fmt}}" if pd.notna(val) else "—"
+
+    game_stats["Avg EV"] = game_stats["Avg EV"].apply(lambda v: _fmt(v, ".1f"))
+    game_stats["xwOBA"]  = game_stats["xwOBA"].apply(lambda v: _fmt(v, ".3f"))
+
+    st.markdown("#### Last 10 Games")
+    st.dataframe(game_stats, use_container_width=True, hide_index=True)
+
+
 def _matchup_score_color(score: float) -> str:
     if score >= 8:
         return "green"
@@ -523,3 +577,4 @@ def render_lineup_analysis(
                 with col_zone:
                     st.plotly_chart(render_hot_cold_zones(sc_df), use_container_width=True)
                 render_batter_sabermetrics(sc_df)
+                render_last_10_games(sc_df)

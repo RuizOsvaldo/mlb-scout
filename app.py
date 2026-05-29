@@ -714,7 +714,7 @@ def render_top_hitters(selected_date: datetime.date) -> None:
     st.title("Top Hitters")
     st.caption(
         f"{selected_date.strftime('%A, %B %-d, %Y')}  ·  "
-        "All batters with platoon advantage, sorted by game start then matchup score."
+        "All batters with matchup score ≥ 5, sorted by game start then score."
     )
 
     fg_batting  = _load_fg_batting(CURRENT_SEASON)
@@ -794,9 +794,6 @@ def render_top_hitters(selected_date: datetime.date) -> None:
                 metrics      = _extract_batter_metrics(fg_row, pd.DataFrame())
                 platoon_adv  = has_platoon_advantage(bat_side, opp_hand)
 
-                if not platoon_adv:
-                    continue
-
                 score = compute_batter_matchup_score(
                     batter_xwoba=metrics["xwoba"],
                     batter_k_pct=metrics["k_pct"] or 0.228,
@@ -844,7 +841,7 @@ def render_top_hitters(selected_date: datetime.date) -> None:
 
     if not adv_players:
         st.info(
-            "No batters found with platoon advantage and score ≥ 5. "
+            "No batters with score ≥ 5 found. "
             "Lineups are typically posted ~3 hours before first pitch."
         )
         return
@@ -864,7 +861,7 @@ def render_top_hitters(selected_date: datetime.date) -> None:
             "B":           r.get("bat_side", ""),
             "vs Pitcher":  f"{p['opp_name']} ({p['opp_hand']}HP)",
             "Score":       round(p["_score"], 1),
-            "Platoon":     "Adv",
+            "Platoon":     "Adv" if p["batter_row"].get("platoon_advantage") else "Dis",
             "xwOBA":       f"{r['xwoba']:.3f}"       if r.get("xwoba")       else "—",
             "AVG":         f"{r['avg']:.3f}"          if r.get("avg")         else "—",
             "OBP":         f"{r['obp']:.3f}"          if r.get("obp")         else "—",
@@ -890,10 +887,10 @@ def render_top_hitters(selected_date: datetime.date) -> None:
     styled = (
         tdf.style
         .map(_color_score, subset=["Score"])
-        .map(lambda _: "color: #2ecc71; font-weight: bold", subset=["Platoon"])
+        .map(lambda v: "color: #2ecc71; font-weight: bold" if v == "Adv" else "color: #e74c3c", subset=["Platoon"])
     )
 
-    st.caption(f"**{len(adv_players)} batters with platoon advantage, score ≥ 5** across {len(games)} games.")
+    st.caption(f"**{len(adv_players)} batters with score ≥ 5** across {len(games)} games.")
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # --- Deep dives ---

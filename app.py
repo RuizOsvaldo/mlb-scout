@@ -808,6 +808,9 @@ def render_top_hitters(selected_date: datetime.date) -> None:
                     platoon_advantage=platoon_adv,
                 )
 
+                if score < 5:
+                    continue
+
                 sc_df = pd.DataFrame()
                 if pid:
                     try:
@@ -841,7 +844,7 @@ def render_top_hitters(selected_date: datetime.date) -> None:
 
     if not adv_players:
         st.info(
-            "No batters with platoon advantage found. "
+            "No batters found with platoon advantage and score ≥ 5. "
             "Lineups are typically posted ~3 hours before first pitch."
         )
         return
@@ -861,6 +864,7 @@ def render_top_hitters(selected_date: datetime.date) -> None:
             "B":           r.get("bat_side", ""),
             "vs Pitcher":  f"{p['opp_name']} ({p['opp_hand']}HP)",
             "Score":       round(p["_score"], 1),
+            "Platoon":     "Adv",
             "xwOBA":       f"{r['xwoba']:.3f}"       if r.get("xwoba")       else "—",
             "AVG":         f"{r['avg']:.3f}"          if r.get("avg")         else "—",
             "OBP":         f"{r['obp']:.3f}"          if r.get("obp")         else "—",
@@ -883,9 +887,13 @@ def render_top_hitters(selected_date: datetime.date) -> None:
             return "color: #f39c12"
         return "color: #e74c3c"
 
-    styled = tdf.style.map(_color_score, subset=["Score"])
+    styled = (
+        tdf.style
+        .map(_color_score, subset=["Score"])
+        .map(lambda _: "color: #2ecc71; font-weight: bold", subset=["Platoon"])
+    )
 
-    st.caption(f"**{len(adv_players)} batters with platoon advantage** across {len(games)} games.")
+    st.caption(f"**{len(adv_players)} batters with platoon advantage, score ≥ 5** across {len(games)} games.")
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # --- Deep dives ---

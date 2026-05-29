@@ -390,6 +390,33 @@ def render_last_10_games(statcast_df: pd.DataFrame) -> None:
     st.dataframe(game_stats, use_container_width=True, hide_index=True)
 
 
+def render_season_avg_line(row: dict) -> None:
+    """One-line season average stats from FanGraphs/Statcast data."""
+    avg    = row.get("avg")
+    obp    = row.get("obp")
+    slg    = row.get("slg")
+    xwoba  = row.get("xwoba")
+    k_pct  = row.get("k_pct")
+    bb_pct = row.get("bb_pct")
+    barrel = row.get("barrel_pct")
+    hh     = row.get("hard_hit_pct")
+    ops    = (obp + slg) if (obp is not None and slg is not None) else None
+
+    if not any([avg, obp, slg, xwoba, k_pct]):
+        return
+
+    st.markdown("#### Season Averages")
+    cols = st.columns(8)
+    cols[0].metric("AVG",     f"{avg:.3f}"    if avg    is not None else "—")
+    cols[1].metric("OBP",     f"{obp:.3f}"    if obp    is not None else "—")
+    cols[2].metric("SLG",     f"{slg:.3f}"    if slg    is not None else "—")
+    cols[3].metric("OPS",     f"{ops:.3f}"    if ops    is not None else "—")
+    cols[4].metric("xwOBA",   f"{xwoba:.3f}"  if xwoba  is not None else "—")
+    cols[5].metric("K%",      f"{k_pct:.1%}"  if k_pct  is not None else "—")
+    cols[6].metric("BB%",     f"{bb_pct:.1%}" if bb_pct is not None else "—")
+    cols[7].metric("Barrel%", f"{barrel:.1%}" if barrel is not None else "—")
+
+
 def _matchup_score_color(score: float) -> str:
     if score >= 8:
         return "green"
@@ -580,4 +607,5 @@ def render_lineup_analysis(
                 with col_zone:
                     st.plotly_chart(render_hot_cold_zones(sc_df), use_container_width=True)
                 render_batter_sabermetrics(sc_df)
+                render_season_avg_line(row)
                 render_last_10_games(sc_df)

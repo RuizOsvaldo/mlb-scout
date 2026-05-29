@@ -36,7 +36,14 @@ from src.models.lineup_analysis import (
 from src.models.game_preview import build_game_preview
 from src.ui.game_selector import render_game_selector
 from src.ui.pitcher_page import render_pitcher_analysis
-from src.ui.lineup_page import render_lineup_analysis
+from src.ui.lineup_page import (
+    render_lineup_analysis,
+    render_spray_chart,
+    render_hot_cold_zones,
+    render_batter_sabermetrics,
+    render_season_avg_line,
+    render_last_10_games,
+)
 from src.ui.prediction_panel import render_prediction_panel
 from src.ui.team_page import render_team_browser
 from src.dashboard.sections.games import render_today_schedule
@@ -699,6 +706,210 @@ def _render_game_context(
 
 
 # ---------------------------------------------------------------------------
+# Top Hitters page
+# ---------------------------------------------------------------------------
+
+def render_top_hitters(selected_date: datetime.date) -> None:
+    """Cross-game board: all batters with platoon advantage, sorted by game start then score."""
+    st.title("Top Hitters")
+    st.caption(
+        f"{selected_date.strftime('%A, %B %-d, %Y')}  ·  "
+        "All batters with platoon advantage, sorted by game start then matchup score."
+    )
+
+    fg_batting  = _load_fg_batting(CURRENT_SEASON)
+    fg_pitching = _load_fg_pitching(CURRENT_SEASON)
+    games       = get_schedule(selected_date)
+
+    if not games:
+        st.info("No games scheduled for this date.")
+        return
+
+    adv_players: list[dict] = []
+    progress = st.progress(0, text="Loading lineups…")
+
+    for i, game in enumerate(games):
+        game_id      = game["game_id"]
+        home_team    = game["home_team"]
+        away_team    = game["away_team"]
+        home_starter = game.get("home_starter")
+        away_starter = game.get("away_starter")
+        home_sid     = game.get("home_starter_id")
+        away_sid     = game.get("away_starter_id")
+        game_time_str = game.get("game_time_et", "")
+
+        progress.progress(
+            (i + 1) / len(games),
+            text=f"Scanning {away_team} @ {home_team}…",
+        )
+
+        try:
+            gdt    = datetime.datetime.fromisoformat(game_time_str.replace("Z", "+00:00"))
+            gdt_et = gdt.astimezone(datetime.timezone(datetime.timedelta(hours=-4)))
+            time_label = gdt_et.strftime("%-I:%M %p ET")
+            sort_key   = gdt_et
+        except Exception:
+            time_label = "TBD"
+            sort_key   = datetime.datetime(9999, 1, 1, tzinfo=datetime.timezone.utc)
+
+        pitcher_ids = [p for p in [home_sid, away_sid] if p]
+        handedness: dict = {}
+        if pitcher_ids:
+            try:
+                handedness = fetch_handedness(pitcher_ids)
+            except Exception:
+                pass
+
+        home_hand = handedness.get(home_sid, {}).get("pitch_hand", "R") if home_sid else "R"
+        away_hand = handedness.get(away_sid, {}).get("pitch_hand", "R") if away_sid else "R"
+
+        def _k(name: str | None, _fp=fg_pitching) -> float:
+            row = _find_fg_pitcher(name, _fp) if name else None
+            if row is None:
+                return 0.228
+            v = row.get("K%")
+            try:
+                fv = float(v)
+                return fv / 100.0 if fv > 1.0 else fv
+            except Exception:
+                return 0.228
+
+        home_k = _k(home_starter)
+        away_k = _k(away_starter)
+
+        for side, batting_team, opp_name, opp_hand, opp_k in [
+            ("away", away_team, home_starter, home_hand, home_k),
+            ("home", home_team, away_starter, away_hand, away_k),
+        ]:
+            lineup = get_confirmed_lineup(game_id, side)
+            if not lineup:
+                continue
+
+            for player in lineup:
+                pid      = player.get("player_id")
+                name     = player.get("player_name", "")
+                bat_side = player.get("bat_side") or "R"
+
+                fg_row       = _find_fg_batter(name, fg_batting)
+                metrics      = _extract_batter_metrics(fg_row, pd.DataFrame())
+                platoon_adv  = has_platoon_advantage(bat_side, opp_hand)
+
+                if not platoon_adv:
+                    continue
+
+                score = compute_batter_matchup_score(
+                    batter_xwoba=metrics["xwoba"],
+                    batter_k_pct=metrics["k_pct"] or 0.228,
+                    batter_bb_pct=metrics["bb_pct"] or 0.083,
+                    batter_barrel_pct=metrics["barrel_pct"],
+                    pitcher_k_pct=opp_k,
+                    pitcher_bb_pct=0.083,
+                    pitcher_gb_pct=None,
+                    platoon_advantage=platoon_adv,
+                )
+
+                sc_df = pd.DataFrame()
+                if pid:
+                    try:
+                        sc_df = get_batter_statcast(pid, CURRENT_SEASON)
+                    except Exception:
+                        pass
+
+                batter_row = {
+                    "batting_order": player.get("batting_order"),
+                    "player_id": pid,
+                    "name": name,
+                    "bat_side": bat_side,
+                    "platoon_advantage": platoon_adv,
+                    "matchup_score": score,
+                    **metrics,
+                }
+
+                adv_players.append({
+                    "_sort":       sort_key,
+                    "_score":      score,
+                    "time_label":  time_label,
+                    "matchup":     f"{away_team} @ {home_team}",
+                    "batting_team": batting_team,
+                    "opp_name":    opp_name or "TBD",
+                    "opp_hand":    opp_hand,
+                    "batter_row":  batter_row,
+                    "sc_df":       sc_df,
+                })
+
+    progress.empty()
+
+    if not adv_players:
+        st.info(
+            "No batters with platoon advantage found. "
+            "Lineups are typically posted ~3 hours before first pitch."
+        )
+        return
+
+    adv_players.sort(key=lambda x: (x["_sort"], -x["_score"]))
+
+    # --- Summary table ---
+    table_rows = []
+    for p in adv_players:
+        r = p["batter_row"]
+        table_rows.append({
+            "Game Start":  p["time_label"],
+            "Matchup":     p["matchup"],
+            "Team":        p["batting_team"],
+            "#":           r.get("batting_order", ""),
+            "Batter":      r.get("name", ""),
+            "B":           r.get("bat_side", ""),
+            "vs Pitcher":  f"{p['opp_name']} ({p['opp_hand']}HP)",
+            "Score":       round(p["_score"], 1),
+            "xwOBA":       f"{r['xwoba']:.3f}"       if r.get("xwoba")       else "—",
+            "AVG":         f"{r['avg']:.3f}"          if r.get("avg")         else "—",
+            "OBP":         f"{r['obp']:.3f}"          if r.get("obp")         else "—",
+            "SLG":         f"{r['slg']:.3f}"          if r.get("slg")         else "—",
+            "K%":          f"{r['k_pct']:.1%}"        if r.get("k_pct")       else "—",
+            "BB%":         f"{r['bb_pct']:.1%}"       if r.get("bb_pct")      else "—",
+            "Barrel%":     f"{r['barrel_pct']:.1%}"   if r.get("barrel_pct")  else "—",
+        })
+
+    tdf = pd.DataFrame(table_rows)
+
+    def _color_score(val):
+        try:
+            v = float(val)
+        except (ValueError, TypeError):
+            return ""
+        if v >= 8:
+            return "color: #2ecc71; font-weight: bold"
+        if v >= 5:
+            return "color: #f39c12"
+        return "color: #e74c3c"
+
+    styled = tdf.style.map(_color_score, subset=["Score"])
+
+    st.caption(f"**{len(adv_players)} batters with platoon advantage** across {len(games)} games.")
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # --- Deep dives ---
+    st.subheader("Player Deep Dives")
+    for p in adv_players:
+        row   = p["batter_row"]
+        sc_df = p["sc_df"]
+        label = (
+            f"{row['name']} — {p['batting_team']}  ·  "
+            f"{p['time_label']}  ·  Score: {p['_score']:.1f}  ·  "
+            f"vs {p['opp_name']} ({p['opp_hand']}HP)"
+        )
+        with st.expander(label):
+            col_spray, col_zone = st.columns(2)
+            with col_spray:
+                st.plotly_chart(render_spray_chart(sc_df), use_container_width=True)
+            with col_zone:
+                st.plotly_chart(render_hot_cold_zones(sc_df), use_container_width=True)
+            render_batter_sabermetrics(sc_df)
+            render_season_avg_line(row)
+            render_last_10_games(sc_df)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -709,7 +920,11 @@ def main() -> None:
     today = datetime.date.today()
     selected_date = st.sidebar.date_input("Date", value=today, max_value=today + datetime.timedelta(days=1))
 
-    page = st.sidebar.radio("Page", ["Game Preview", "Team Analysis", "About"], label_visibility="collapsed")
+    page = st.sidebar.radio(
+        "Page",
+        ["Game Preview", "Top Hitters", "Team Analysis", "About"],
+        label_visibility="collapsed",
+    )
 
     if page == "About":
         render_about()
@@ -717,6 +932,10 @@ def main() -> None:
 
     if page == "Team Analysis":
         render_team_browser()
+        return
+
+    if page == "Top Hitters":
+        render_top_hitters(selected_date)
         return
 
     if st.sidebar.button("Refresh Data"):

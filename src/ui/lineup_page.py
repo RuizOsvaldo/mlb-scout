@@ -607,5 +607,5 @@ def render_lineup_analysis(
                 with col_zone:
                     st.plotly_chart(render_hot_cold_zones(sc_df), use_container_width=True)
                 render_batter_sabermetrics(sc_df)
-                render_season_avg_line(row)
                 render_last_10_games(sc_df)
+                render_season_avg_line(row)

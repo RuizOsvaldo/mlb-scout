@@ -788,11 +788,28 @@ def render_top_hitters(selected_date: datetime.date) -> None:
             for player in lineup:
                 pid      = player.get("player_id")
                 name     = player.get("player_name", "")
-                bat_side = player.get("bat_side") or "R"
+                bat_side = player.get("bat_side") or ""
 
-                fg_row       = _find_fg_batter(name, fg_batting)
-                metrics      = _extract_batter_metrics(fg_row, pd.DataFrame())
-                platoon_adv  = has_platoon_advantage(bat_side, opp_hand)
+                fg_row = _find_fg_batter(name, fg_batting)
+
+                # Load statcast first — same as _build_lineup_rows — so metrics
+                # get the statcast supplement (xwOBA, barrel%) before scoring.
+                sc_df = pd.DataFrame()
+                if pid:
+                    try:
+                        sc_df = get_batter_statcast(pid, CURRENT_SEASON)
+                    except Exception:
+                        pass
+
+                # Bat-side fallback from statcast (mirrors _build_lineup_rows)
+                if not bat_side and not sc_df.empty and "stand" in sc_df.columns:
+                    mode = sc_df["stand"].dropna().mode()
+                    bat_side = mode.iloc[0] if not mode.empty else "R"
+                if not bat_side:
+                    bat_side = "R"
+
+                metrics     = _extract_batter_metrics(fg_row, sc_df)
+                platoon_adv = has_platoon_advantage(bat_side, opp_hand)
 
                 score = compute_batter_matchup_score(
                     batter_xwoba=metrics["xwoba"],
@@ -807,13 +824,6 @@ def render_top_hitters(selected_date: datetime.date) -> None:
 
                 if score < 5:
                     continue
-
-                sc_df = pd.DataFrame()
-                if pid:
-                    try:
-                        sc_df = get_batter_statcast(pid, CURRENT_SEASON)
-                    except Exception:
-                        pass
 
                 batter_row = {
                     "batting_order": player.get("batting_order"),
